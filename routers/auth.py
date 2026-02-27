@@ -1,13 +1,17 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
+
 from config.database import SessionLocal
 from models.user import User
-from schemas.user import UserCreate, UserLogin
+from schemas.user import UserCreate
 from services.security import hash_password, verify_password
 from services.auth import create_access_token
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
+
+# DB dependency
 def get_db():
     db = SessionLocal()
     try:
@@ -15,11 +19,16 @@ def get_db():
     finally:
         db.close()
 
-@router.post("/register")
+
+# 🔐 REGISTER (JSON)
+@router.post("/register", status_code=status.HTTP_201_CREATED)
 def register(user: UserCreate, db: Session = Depends(get_db)):
     exists = db.query(User).filter(User.email == user.email).first()
     if exists:
-        raise HTTPException(status_code=400, detail="Email ya registrado")
+        raise HTTPException(
+            status_code=400,
+            detail="Email ya registrado"
+        )
 
     new_user = User(
         name=user.name,
@@ -34,13 +43,31 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
 
     return {"message": "Usuario creado correctamente"}
 
+
+# 🔑 LOGIN (OAuth2 / Swagger compatible)
 @router.post("/login")
-def login(user: UserLogin, db: Session = Depends(get_db)):
-    db_user = db.query(User).filter(User.email == user.email).first()
+def login(
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db)
+):
+    user = db.query(User).filter(
+        User.email == form_data.username
+    ).first()
 
-    if not db_user or not verify_password(user.password, db_user.hashed_password):
-        raise HTTPException(status_code=401, detail="Credenciales incorrectas")
+    if not user or not verify_password(
+        form_data.password,
+        user.hashed_password
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Credenciales incorrectas"
+        )
 
-    token = create_access_token({"sub": db_user.email})
+    access_token = create_access_token(
+        data={"sub": user.email}
+    )
 
-    return {"access_token": token, "token_type": "bearer"}
+    return {
+        "access_token": access_token,
+        "token_type": "bearer"
+    }
